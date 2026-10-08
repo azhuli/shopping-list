@@ -36,6 +36,11 @@ main{padding:14px}
 .lbl{font-size:12px;color:var(--sub)}
 .big{font-size:22px;font-weight:700;margin-top:2px;word-break:break-all}
 .big.g{color:var(--accent-d)}
+.loc{font-size:12px;color:var(--sub);margin-top:1px}
+.rrow{display:flex;align-items:center;gap:6px;margin-top:10px;font-size:14px;color:var(--sub);flex-wrap:wrap}
+.rrow input{width:96px;font-size:16px;padding:7px 10px;border:1px solid var(--line);border-radius:10px;background:#fffaf0;color:var(--ink);-webkit-appearance:none;appearance:none}
+.amtc{text-align:right}
+.amtc small{display:block;font-size:12px;color:var(--sub);font-weight:400}
 details{margin-top:12px;border-top:1px dashed var(--line);padding-top:8px}
 summary{font-size:14px;color:var(--accent-d);font-weight:600;padding:6px 0;list-style:none}
 summary::-webkit-details-marker{display:none}
@@ -167,13 +172,17 @@ var $=function(s){return document.querySelector(s)};
 var esc=function(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})};
 var uid=function(){return Math.random().toString(36).slice(2,9)+Date.now().toString(36)};
 var num=function(v){var n=parseFloat(v);return isFinite(n)?n:0};
-var APP_VER='1.5（10/08 裁切版）';
+var APP_VER='1.6（10/08 匯率版）';
 var MAX_Q=9999,MAX_P=9999999;
 var qint=function(v){return Math.min(MAX_Q,Math.max(0,Math.round(num(v))))};
 var pnum=function(v){return Math.min(MAX_P,Math.max(0,Math.round(num(v)*100)/100))};
 var clip=function(s,n){return String(s==null?'':s).slice(0,n)};
 var okImg=function(s){return typeof s==='string'&&/^data:image\/(jpeg|png|webp|gif);base64,[A-Za-z0-9+\/=]+$/.test(s)};
-var money=function(n){n=Math.round(n*100)/100;return '$'+n.toLocaleString('zh-TW')};
+var rnum=function(v){return Math.min(99999,Math.max(0,Math.round(num(v)*10000)/10000))};
+var loc=function(n){n=Math.round(n*100)/100;return n.toLocaleString('zh-TW')};
+var twd=function(n){return 'NT$'+Math.round(n*data.rate).toLocaleString('zh-TW')};
+var hasRate=function(){return data.rate>0};
+var money=function(n){return hasRate()?twd(n):loc(n)};
 var noPrice=function(it){return it.price===''||it.price==null};
 
 /* ---------- 儲存（IndexedDB，失敗時退回 localStorage） ---------- */
@@ -205,7 +214,7 @@ var DB={
   }
 };
 
-var data={agent:[],must:[]};
+var data={agent:[],must:[],rate:0};
 var tab='agent',ready=false,touched=false,pendingRender=false,peopleOpen=false;
 try{tab=localStorage.getItem('shoplist_tab')==='must'?'must':'agent'}catch(e){}
 var saveTimer=null;
@@ -215,7 +224,7 @@ document.addEventListener('visibilitychange',function(){if(document.visibilitySt
 window.addEventListener('pagehide',flush);
 
 function normalize(d){
-  var out={agent:[],must:[]},seen={};
+  var out={agent:[],must:[],rate:rnum(d&&d.rate)},seen={};
   var arr=function(x){return Array.isArray(x)?x:[]};
   var mkid=function(id){id=String(id==null?'':id).replace(/[^\w-]/g,'').slice(0,40);if(!id||seen[id])id=uid();seen[id]=1;return id};
   arr(d&&d.agent).forEach(function(it){
@@ -258,10 +267,12 @@ function calc(){
 function summaryHTML(){
   var c=calc();
   var h='<div class="summary"><div class="sumrow">'+
-    '<div><div class="lbl">預計總額</div><div class="big">'+money(c.exp)+'</div></div>'+
-    '<div><div class="lbl">已買金額（'+c.dn+'/'+c.n+' 項）</div><div class="big g">'+money(c.got)+'</div></div></div>';
+    '<div><div class="lbl">預計總額</div><div class="big">'+money(c.exp)+'</div>'+(hasRate()?'<div class="loc">當地 '+loc(c.exp)+'</div>':'')+'</div>'+
+    '<div><div class="lbl">已買金額（'+c.dn+'/'+c.n+' 項）</div><div class="big g">'+money(c.got)+'</div>'+(hasRate()?'<div class="loc">當地 '+loc(c.got)+'</div>':'')+'</div></div>'+
+    '<div class="rrow"><span>匯率　1 當地幣 ＝</span><input type="number" inputmode="decimal" min="0" max="99999" step="any" data-rate="1" value="'+(hasRate()?data.rate:'')+'" placeholder="例 0.22" aria-label="匯率"><span>台幣</span></div>'+
+    (hasRate()?'':'<div class="hint">單價請填當地貨幣；填了匯率就會換算成台幣。</div>');
   var np=data.agent.filter(noPrice).length;
-  if(np)h+='<div class="hint flag">尚有 '+np+' 項未填單價，金額暫以 $0 計算</div>';
+  if(np)h+='<div class="hint flag">尚有 '+np+' 項未填單價，金額暫以 0 計算</div>';
   var names=Object.keys(c.ppl);
   if(names.length){
     h+='<details'+(peopleOpen?' open':'')+'><summary>各人應收總覽</summary>';
@@ -300,7 +311,7 @@ function softRender(id){
   setTimeout(function(){
     if(inlineActive()){
       pendingRender=true;updateCounts();
-      var sm=$('.summary');if(sm&&tab==='agent')sm.outerHTML=summaryHTML();
+      var sm=$('.summary');if(sm&&tab==='agent'&&!sm.contains(document.activeElement))sm.outerHTML=summaryHTML();
       if(id&&tab==='agent'){
         var it=data.agent.filter(function(x){return x.id===id})[0],tt=document.querySelector('.card[data-id="'+id+'"] .tot');
         if(it&&tt)tt.innerHTML=totInner(it);
@@ -323,7 +334,7 @@ function totInner(it){
   var tot=0,got=0;
   it.buyers.forEach(function(b){tot+=num(b.qty);got+=(b.got==null?num(b.qty):num(b.got))});
   var p=num(it.price),hp=!noPrice(it),short=it.done&&got<tot;
-  return '<span class="'+(short?'flag':'meta')+'">'+(it.done?('實買 '+got+' ／ 需 '+tot+' 個'):('合計 '+tot+' 個'))+'</span><b>'+(hp?money(p*(it.done?got:tot)):'<span class="flag">待填單價</span>')+'</b>';
+  return '<span class="'+(short?'flag':'meta')+'">'+(it.done?('實買 '+got+' ／ 需 '+tot+' 個'):('合計 '+tot+' 個'))+'</span>'+(hp?'<span class="amtc"><b>'+money(p*(it.done?got:tot))+'</b>'+(hasRate()?'<small>當地 '+loc(p*(it.done?got:tot))+'</small>':'')+'</span>':'<b><span class="flag">待填單價</span></b>');
 }
 function agentCard(it){
   var tot=0,got=0;
@@ -337,7 +348,7 @@ function agentCard(it){
     '<button class="chk" data-check="'+it.id+'" type="button" aria-label="已購買">✓</button>'+
     '<div class="info">'+
       '<div class="name'+(it.name?'':' empty')+'">'+esc(it.name||'（未命名）')+'</div>'+
-      '<div class="prow"><span class="meta">單價</span><span class="pwrap">$<input type="number" inputmode="decimal" min="0" max="'+MAX_P+'" step="any" data-price="'+it.id+'" class="'+(hp?'':'nop')+'" value="'+esc(hp?it.price:'')+'" placeholder="現場填" aria-label="單價"></span></div>'+
+      '<div class="prow"><span class="meta">單價</span><span class="pwrap"><input type="number" inputmode="decimal" min="0" max="'+MAX_P+'" step="any" data-price="'+it.id+'" class="'+(hp?'':'nop')+'" value="'+esc(hp?it.price:'')+'" placeholder="現場填" aria-label="單價"></span></div>'+
       '<div class="chips">'+chips+'</div>'+grows+
       '<div class="tot">'+totInner(it)+'</div>'+
       '<button class="buybtn" data-check="'+it.id+'" type="button">'+(it.done?'☑ 已購買（再點一次取消）':'☐ 標記已購買')+'</button>'+
@@ -679,6 +690,9 @@ $('#main').addEventListener('change',function(e){
     data.agent.forEach(function(x){if(x.id===gid&&x.buyers[bi]){var b=x.buyers[bi];b.got=v===''?null:qint(v);if(b.got===num(b.qty))b.got=null}});
     save();softRender(gid);return;
   }
+  if(at('data-rate')){
+    data.rate=rnum(v);save();softRender();return;
+  }
   var pid=at('data-price');
   if(!pid)return;
   data.agent.forEach(function(x){if(x.id===pid)x.price=(v===''?'':pnum(v))});
@@ -724,7 +738,7 @@ $('#menuBtn').addEventListener('click',function(){
 function exportData(){
   var d=new Date(),p=function(n){return String(n).padStart(2,'0')};
   var name='購買清單備份_'+d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())+'.json';
-  var blob=new Blob([JSON.stringify({version:1,exported:d.toISOString(),agent:data.agent,must:data.must})],{type:'application/json'});
+  var blob=new Blob([JSON.stringify({version:1,exported:d.toISOString(),agent:data.agent,must:data.must,rate:data.rate})],{type:'application/json'});
   var file;try{file=new File([blob],name,{type:'application/json'})}catch(e){}
   if(file&&navigator.canShare&&navigator.canShare({files:[file]})){
     navigator.share({files:[file],title:'購買清單備份'}).catch(function(){});
@@ -761,7 +775,7 @@ $('#fileImport').addEventListener('change',function(){
 /* ---------- 啟動 ---------- */
 function startWith(d){
   if(ready&&touched)return;
-  try{data=normalize(d)}catch(e){data={agent:[],must:[]};toast('讀取舊資料失敗')}
+  try{data=normalize(d)}catch(e){data={agent:[],must:[],rate:0};toast('讀取舊資料失敗')}
   ready=true;render();
 }
 render();
